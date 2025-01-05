@@ -151,14 +151,6 @@ void setup() {
 
     // Start Zigbee task
     ZB_StartMainTask();
-
-    // Check the current state of the on/off attribute and set the relay accordingly
-    bool onOffState = false;
-    esp_zb_zcl_attr_t *attr = esp_zb_zcl_get_attribute(HA_ESP_SENSOR_ENDPOINT, ESP_ZB_ZCL_CLUSTER_ID_ON_OFF, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE, ESP_ZB_ZCL_ATTR_ON_OFF_ON_OFF_ID);
-    if (attr) {
-        onOffState = *(bool *)(attr->data_p);
-    }
-    digitalWrite(RELAY_PIN, onOffState ? HIGH : LOW);
 }
 
 void loop() {
