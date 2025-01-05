@@ -20,6 +20,7 @@
 
 // Onboard WS2182 LED used by identify
 #define RGB_LED_PIN GPIO_NUM_8
+#define RELAY_PIN GPIO_NUM_15
 static Adafruit_NeoPixel rgbLed(1, RGB_LED_PIN, NEO_GRB + NEO_KHZ800);
 
 /********************* Zigbee Callbacks **************************/
@@ -42,7 +43,7 @@ esp_err_t onAttributeUpdated(const esp_zb_zcl_set_attr_value_message_t *message)
     } else if (message->info.status != ESP_ZB_ZCL_STATUS_SUCCESS) {
         log_e("Received message: error status(%d)", message->info.status);
     } else {
-        log_i("Received message: endpoint(%d), cluster(0x%x), attribute(0x%x), data size(%d)", message->info.dst_endpoint, message->info.cluster, message->attribute.id,message->attribute.data.size);
+        log_i("Received message: endpoint(%d), cluster(0x%x), attribute(0x%x), data size(%d)", message->info.dst_endpoint, message->info.cluster, message->attribute.id, message->attribute.data.size);
 
         // Handle our remote switch toggle
         if (message->info.dst_endpoint == HA_ESP_SENSOR_ENDPOINT && message->info.cluster == ESP_ZB_ZCL_CLUSTER_ID_ON_OFF) {
@@ -50,6 +51,9 @@ esp_err_t onAttributeUpdated(const esp_zb_zcl_set_attr_value_message_t *message)
                 case ESP_ZB_ZCL_ATTR_ON_OFF_ON_OFF_ID: {
                     bool switchState = *(bool *)(message->attribute.data.value);
                     log_i("Switch state changed to: %s", switchState ? "on" : "off");
+
+                    // Set the relay pin based on switch state
+                    digitalWrite(RELAY_PIN, switchState ? HIGH : LOW);
                     break;
                 }
 
@@ -114,6 +118,10 @@ void setup() {
     rgbLed.setBrightness(64);
     rgbLed.clear();
     rgbLed.show();
+
+    // Initialize the relay pin
+    pinMode(RELAY_PIN, OUTPUT);
+    digitalWrite(RELAY_PIN, LOW); // Ensure relay is off by default
 
     // Set our callbacks for Zigbee events
     ZB_SetOnCreateClustersCallback(onCreateClusters);
