@@ -58,28 +58,8 @@ esp_err_t onAttributeUpdated(const esp_zb_zcl_set_attr_value_message_t *message)
                     // Set the relay pin based on switch state
                     digitalWrite(RELAY_PIN, switchState ? LOW : HIGH); // Turn the relay on when switchState is true
 
-                    // Flash the LED in the background
-                    xTaskCreate(
-                        [](void *param) {
-                            Adafruit_NeoPixel *led = static_cast<Adafruit_NeoPixel *>(param);
-                            bool switchState = *(static_cast<bool *>(param + sizeof(Adafruit_NeoPixel *)));
-                            int color = switchState ? led->Color(0, 255, 0) : led->Color(255, 0, 0);
-                            for (int i = 0; i < 2; i++) {
-                                led->setPixelColor(0, color);
-                                led->show();
-                                delay(200);
-                                led->clear();
-                                led->show();
-                                delay(200);
-                            }
-                            vTaskDelete(NULL);
-                        },
-                        "flash_led_task",
-                        2048,
-                        new uint8_t[sizeof(rgbLed) + sizeof(bool)]{*(reinterpret_cast<uint8_t *>(&rgbLed)), switchState},
-                        10,
-                        NULL
-                    );
+                    // Flash the LED based on switch state
+                    flashLED(switchState);
                     break;
                 }
 
@@ -91,6 +71,18 @@ esp_err_t onAttributeUpdated(const esp_zb_zcl_set_attr_value_message_t *message)
     }
 
     return ret;
+}
+
+void flashLED(bool switchState) {
+    int color = switchState ? rgbLed.Color(0, 255, 0) : rgbLed.Color(255, 0, 0); // Green for on, red for off
+    for (int i = 0; i < 2; i++) {
+        rgbLed.setPixelColor(0, color);
+        rgbLed.show();
+        delay(200);
+        rgbLed.clear();
+        rgbLed.show();
+        delay(200);
+    }
 }
 
 esp_err_t onCustomClusterCommand(const esp_zb_zcl_custom_cluster_command_message_t *message) {
