@@ -18,10 +18,14 @@
 #include "Zigbee/zigbee.h"
 #include "Switches/switches.h"
 
-// Onboard WS2182 LED used by identify
+// RGB LED pin
 #define RGB_LED_PIN GPIO_NUM_8
 #define RELAY_PIN GPIO_NUM_15
 static Adafruit_NeoPixel rgbLed(1, RGB_LED_PIN, NEO_GRB + NEO_KHZ800);
+
+// States
+bool isZigbeeConnected = false;
+static bool isZigbeeIdentifying = false;
 
 /********************* Zigbee Callbacks **************************/
 void onCreateClusters(esp_zb_cluster_list_t *clusterList) {
@@ -52,6 +56,27 @@ esp_err_t onAttributeUpdated(const esp_zb_zcl_set_attr_value_message_t *message)
                     bool switchState = *(bool *)(message->attribute.data.value);
                     log_i("Switch state changed to: %s", switchState ? "on" : "off");
 
+                    // Flash green twice when turning the relay on
+                    if (switchState) {
+                        for (int i = 0; i < 2; i++) {
+                            rgbLed.setPixelColor(0, rgbLed.Color(0, 255, 0)); // Green
+                            rgbLed.show();
+                            delay(200);
+                            rgbLed.clear();
+                            rgbLed.show();
+                            delay(200);
+                        }
+                    } else { // Flash red twice when turning the relay off
+                        for (int i = 0; i < 2; i++) {
+                            rgbLed.setPixelColor(0, rgbLed.Color(255, 0, 0)); // Red
+                            rgbLed.show();
+                            delay(200);
+                            rgbLed.clear();
+                            rgbLed.show();
+                            delay(200);
+                        }
+                    }
+
                     // Set the relay pin based on switch state
                     digitalWrite(RELAY_PIN, switchState ? HIGH : LOW);
                     break;
@@ -77,22 +102,17 @@ esp_err_t onCustomClusterCommand(const esp_zb_zcl_custom_cluster_command_message
 }
 
 // Identify thread task
-static bool isZigbeeIdentifying = false;
 static void taskZigbeeIdentify(void *arg) {
     log_i("Identify task started");
-    int16_t hue = 0;
 
     while (isZigbeeIdentifying) {
-        rgbLed.rainbow(hue);
+        rgbLed.setPixelColor(0, rgbLed.Color(255, 165, 0)); // Orange
         rgbLed.show();
-
-        hue += 1000;
-
-        delay(50);
+        delay(500);
+        rgbLed.clear();
+        rgbLed.show();
+        delay(500);
     }
-    
-    rgbLed.clear();
-    rgbLed.show();
 
     log_i("Identify task ended");
     vTaskDelete(NULL);
@@ -135,4 +155,26 @@ void setup() {
 
 void loop() {
     SW_Loop();
+
+    // Handle connection status indication
+    static uint32_t lastUpdateTime = 0;
+    static int fadeValue = 0;
+    static bool fadeDirection = true;
+
+    if (isZigbeeConnected && !isZigbeeIdentifying) {
+        if (millis() - lastUpdateTime > 30) {
+            lastUpdateTime = millis();
+
+            if (fadeDirection) {
+                fadeValue++;
+                if (fadeValue >= 255) fadeDirection = false;
+            } else {
+                fadeValue--;
+                if (fadeValue <= 0) fadeDirection = true;
+            }
+
+            rgbLed.setPixelColor(0, rgbLed.Color(fadeValue, 0, fadeValue)); // Purple with fade effect
+            rgbLed.show();
+        }
+    }
 }
