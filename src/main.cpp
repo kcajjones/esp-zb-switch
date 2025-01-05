@@ -14,7 +14,6 @@
 
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
-
 #include "Zigbee/zigbee.h"
 #include "Switches/switches.h"
 
@@ -41,7 +40,7 @@ void onCreateClusters(esp_zb_cluster_list_t *clusterList) {
 esp_err_t onAttributeUpdated(const esp_zb_zcl_set_attr_value_message_t *message) {
     esp_err_t ret = ESP_OK;
 
-    // handle any logic required when attributes are updated
+    // Handle any logic required when attributes are updated
     if (!message) {
         log_e("Empty message");
     } else if (message->info.status != ESP_ZB_ZCL_STATUS_SUCCESS) {
@@ -56,29 +55,31 @@ esp_err_t onAttributeUpdated(const esp_zb_zcl_set_attr_value_message_t *message)
                     bool switchState = *(bool *)(message->attribute.data.value);
                     log_i("Switch state changed to: %s", switchState ? "on" : "off");
 
-                    // Flash green twice when turning the relay on
-                    if (switchState) {
-                        for (int i = 0; i < 2; i++) {
-                            rgbLed.setPixelColor(0, rgbLed.Color(0, 255, 0)); // Green
-                            rgbLed.show();
-                            delay(200);
-                            rgbLed.clear();
-                            rgbLed.show();
-                            delay(200);
-                        }
-                    } else { // Flash red twice when turning the relay off
-                        for (int i = 0; i < 2; i++) {
-                            rgbLed.setPixelColor(0, rgbLed.Color(255, 0, 0)); // Red
-                            rgbLed.show();
-                            delay(200);
-                            rgbLed.clear();
-                            rgbLed.show();
-                            delay(200);
-                        }
-                    }
-
                     // Set the relay pin based on switch state
-                    digitalWrite(RELAY_PIN, switchState ? HIGH : LOW);
+                    digitalWrite(RELAY_PIN, switchState ? LOW : HIGH); // Turn the relay on when switchState is true
+
+                    // Flash the LED in the background
+                    xTaskCreate(
+                        [](void *param) {
+                            Adafruit_NeoPixel *led = static_cast<Adafruit_NeoPixel *>(param);
+                            bool switchState = *(static_cast<bool *>(param + sizeof(Adafruit_NeoPixel *)));
+                            int color = switchState ? led->Color(0, 255, 0) : led->Color(255, 0, 0);
+                            for (int i = 0; i < 2; i++) {
+                                led->setPixelColor(0, color);
+                                led->show();
+                                delay(200);
+                                led->clear();
+                                led->show();
+                                delay(200);
+                            }
+                            vTaskDelete(NULL);
+                        },
+                        "flash_led_task",
+                        2048,
+                        new uint8_t[sizeof(rgbLed) + sizeof(bool)]{*(reinterpret_cast<uint8_t *>(&rgbLed)), switchState},
+                        10,
+                        NULL
+                    );
                     break;
                 }
 
@@ -95,7 +96,7 @@ esp_err_t onAttributeUpdated(const esp_zb_zcl_set_attr_value_message_t *message)
 esp_err_t onCustomClusterCommand(const esp_zb_zcl_custom_cluster_command_message_t *message) {
     esp_err_t ret = ESP_OK;
 
-    // handle any logic required when receiving a command
+    // Handle any logic required when receiving a command
     log_i("Receive Custom Cluster Command: 0x%x", message->info.command);
 
     return ret;
@@ -141,7 +142,7 @@ void setup() {
 
     // Initialize the relay pin
     pinMode(RELAY_PIN, OUTPUT);
-    digitalWrite(RELAY_PIN, LOW); // Ensure relay is off by default
+    digitalWrite(RELAY_PIN, HIGH); // Ensure relay is off by default (since off when HIGH)
 
     // Set our callbacks for Zigbee events
     ZB_SetOnCreateClustersCallback(onCreateClusters);
