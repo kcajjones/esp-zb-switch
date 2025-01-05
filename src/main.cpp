@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
 #include "Zigbee/zigbee.h"
@@ -57,8 +58,27 @@ esp_err_t onAttributeUpdated(const esp_zb_zcl_set_attr_value_message_t *message)
                     // Set the relay pin based on switch state
                     digitalWrite(RELAY_PIN, switchState ? LOW : HIGH); // Turn the relay on when switchState is true
 
-                    // Flash the LED based on switch state
-                    flashLED(switchState);
+                    // Create a task to flash the LED based on switch state
+                    xTaskCreate(
+                        [](void *param) {
+                            bool switchState = *(bool *)param;
+                            int color = switchState ? rgbLed.Color(0, 255, 0) : rgbLed.Color(255, 0, 0); // Green for on, red for off
+                            for (int i = 0; i < 2; i++) {
+                                rgbLed.setPixelColor(0, color);
+                                rgbLed.show();
+                                delay(200);
+                                rgbLed.clear();
+                                rgbLed.show();
+                                delay(200);
+                            }
+                            vTaskDelete(NULL);
+                        },
+                        "flash_led_task",
+                        2048,
+                        new bool(switchState),
+                        10,
+                        NULL
+                    );
                     break;
                 }
 
@@ -70,18 +90,6 @@ esp_err_t onAttributeUpdated(const esp_zb_zcl_set_attr_value_message_t *message)
     }
 
     return ret;
-}
-
-void flashLED(bool switchState) {
-    int color = switchState ? rgbLed.Color(0, 255, 0) : rgbLed.Color(255, 0, 0); // Green for on, red for off
-    for (int i = 0; i < 2; i++) {
-        rgbLed.setPixelColor(0, color);
-        rgbLed.show();
-        delay(200);
-        rgbLed.clear();
-        rgbLed.show();
-        delay(200);
-    }
 }
 
 esp_err_t onCustomClusterCommand(const esp_zb_zcl_custom_cluster_command_message_t *message) {
