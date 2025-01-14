@@ -27,3 +27,7 @@ GPIO 8 is the EPC32-C6-DevKitC-1-N8 integrated RGB LED.
 TO DO:
 Control LED light strip with dimmer functionality. LED Driver and LED strip is single colour not addressable, but is dimmable.
 Need to investigate how to connect ESP32 to LED driver/LED strip. Maybe mosfet?
+
+
+**NOTE**
+*This code is based on Skye-Harris's implemantion based on Espressif's Arduino-ESP32 code and heavily modified largely by AI with my minimal coding knowledge. This code won't be optimal and might not function as intended.*
