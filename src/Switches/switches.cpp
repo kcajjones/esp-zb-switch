@@ -1,23 +1,12 @@
-// Copyright 2024 Espressif Systems (Shanghai) PTE LTD
-// Modifications Copyright 2024 Skye Harris
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-#include "Switches/switches.h"
+#include "../main.h"
+#include "switches.h"
 #include "Zigbee/zigbee.h"
+#include "../buzzer/buzzer.h"
+#include "../timer/timer.h"  // Add this include
 
 /********************* GPIO functions **************************/
 static QueueHandle_t gpioEventQueue = NULL;
+static switch_state_t switch_state = SWITCH_IDLE;  // Add state definition
 
 static void IRAM_ATTR gpioIsrHandler(void *arg) {
     xQueueSendFromISR(gpioEventQueue, (switch_func_pair_t *)arg, NULL);
@@ -33,10 +22,47 @@ static void setGpioInterruptEnabled(bool enabled) {
     }
 }
 
+#define LONG_PRESS_TIME 1500  // 1.5 seconds
+static unsigned long pressStartTime = 0;
+
 static void onButtonPress(switch_func_pair_t *button_func_pair) {
     switch (button_func_pair->func) {
         case SWITCH_RESET_CONTROL:
-            ZB_FactoryReset();
+            if (switch_state != SWITCH_LONG_PRESS_DETECTED) {  // Ignore long press for reset
+                ZB_FactoryReset();
+            }
+            break;
+        case SWITCH_FAN_CONTROL:
+            if (switch_state == SWITCH_LONG_PRESS_DETECTED) {
+                digitalWrite(RELAY_FAN_PIN, HIGH);
+                digitalWrite(LED_FAN_PIN, HIGH);
+                TM_StartTimer(0);
+                BZ_PlayTimerTone(true, true);
+            } else {
+                bool newState = !digitalRead(RELAY_FAN_PIN);
+                digitalWrite(RELAY_FAN_PIN, newState);
+                digitalWrite(LED_FAN_PIN, newState);
+                if (!newState) {
+                    TM_StopTimer(0);  // Stop timer when turned off
+                }
+                BZ_PlayShortBeep(true);
+            }
+            break;
+        case SWITCH_LIGHT_CONTROL:
+            if (switch_state == SWITCH_LONG_PRESS_DETECTED) {
+                digitalWrite(RELAY_LIGHT_PIN, HIGH);
+                digitalWrite(LED_LIGHT_PIN, HIGH);
+                TM_StartTimer(1);
+                BZ_PlayTimerTone(true, false);
+            } else {
+                bool newState = !digitalRead(RELAY_LIGHT_PIN);
+                digitalWrite(RELAY_LIGHT_PIN, newState);
+                digitalWrite(LED_LIGHT_PIN, newState);
+                if (!newState) {
+                    TM_StopTimer(1);  // Stop timer when turned off
+                }
+                BZ_PlayShortBeep(false);
+            }
             break;
     }
 }
@@ -59,7 +85,6 @@ void SW_Loop() {
     // Handle button switch in loop()
     uint8_t pin = 0;
     switch_func_pair_t button_func_pair;
-    static switch_state_t switch_state = SWITCH_IDLE;
 
     /* check if there is any queue received, if yes read out the button_func_pair */
     if (xQueueReceive(gpioEventQueue, &button_func_pair, portMAX_DELAY)) {
@@ -71,10 +96,19 @@ void SW_Loop() {
 
             switch (switch_state) {
                 case SWITCH_IDLE:
-                    switch_state = (value == LOW) ? SWITCH_PRESS_DETECTED : SWITCH_IDLE;
+                    if (value == LOW) {
+                        pressStartTime = millis();
+                        switch_state = SWITCH_PRESS_DETECTED;
+                    }
                     break;
                 case SWITCH_PRESS_DETECTED:
-                    switch_state = (value == LOW) ? SWITCH_PRESS_DETECTED : SWITCH_RELEASE_DETECTED;
+                    if (value == LOW) {
+                        if (millis() - pressStartTime > LONG_PRESS_TIME) {
+                            switch_state = SWITCH_LONG_PRESS_DETECTED;
+                        }
+                    } else {
+                        switch_state = SWITCH_RELEASE_DETECTED;
+                    }
                     break;
                 case SWITCH_RELEASE_DETECTED:
                     switch_state = SWITCH_IDLE;
