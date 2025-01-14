@@ -14,17 +14,37 @@
 
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
+
 #include "Zigbee/zigbee.h"
 #include "Switches/switches.h"
+#include "timer/timer.h"
+#include "buzzer/buzzer.h"
+#include "main.h"
 
-// RGB LED pin
-#define RGB_LED_PIN GPIO_NUM_8
-#define RELAY_PIN GPIO_NUM_15
 static Adafruit_NeoPixel rgbLed(1, RGB_LED_PIN, NEO_GRB + NEO_KHZ800);
 
 // States
 bool isZigbeeConnected = false;
 static bool isZigbeeIdentifying = false;
+
+void flashRgbLed(bool isFan, bool isOn) {
+    uint32_t color;
+    if (isFan) {
+        color = isOn ? rgbLed.Color(0, 255, 0) : rgbLed.Color(255, 0, 0);  // Green/Red
+    } else {
+        color = isOn ? rgbLed.Color(255, 255, 255) : rgbLed.Color(255, 165, 0);  // White/Orange
+    }
+
+    // Double flash pattern
+    for (int i = 0; i < 2; i++) {
+        rgbLed.setPixelColor(0, color);
+        rgbLed.show();
+        delay(200);
+        rgbLed.clear();
+        rgbLed.show();
+        delay(200);
+    }
+}
 
 /********************* Zigbee Callbacks **************************/
 void onCreateClusters(esp_zb_cluster_list_t *clusterList) {
@@ -39,63 +59,59 @@ void onCreateClusters(esp_zb_cluster_list_t *clusterList) {
 
 esp_err_t onAttributeUpdated(const esp_zb_zcl_set_attr_value_message_t *message) {
     esp_err_t ret = ESP_OK;
-
-    // Handle any logic required when attributes are updated
     if (!message) {
-        log_e("Empty message");
-    } else if (message->info.status != ESP_ZB_ZCL_STATUS_SUCCESS) {
-        log_e("Received message: error status(%d)", message->info.status);
-    } else {
-        log_i("Received message: endpoint(%d), cluster(0x%x), attribute(0x%x), data size(%d)", message->info.dst_endpoint, message->info.cluster, message->attribute.id, message->attribute.data.size);
-
-        // Handle our remote switch toggle
-        if (message->info.dst_endpoint == HA_ESP_SENSOR_ENDPOINT && message->info.cluster == ESP_ZB_ZCL_CLUSTER_ID_ON_OFF) {
-            switch (message->attribute.id) {
-                case ESP_ZB_ZCL_ATTR_ON_OFF_ON_OFF_ID: {
-                    bool switchState = *(bool *)(message->attribute.data.value);
-                    log_i("Switch state changed to: %s", switchState ? "on" : "off");
-
-                    // Set the relay pin based on switch state
-                    digitalWrite(RELAY_PIN, switchState ? LOW : HIGH); // Turn the relay on when switchState is true
-
-                    // Create a task to flash the LED based on switch state
-                    xTaskCreate(
-                        [](void *param) {
-                            bool switchState = *(bool *)param;
-                            int color = switchState ? rgbLed.Color(0, 255, 0) : rgbLed.Color(255, 0, 0); // Green for on, red for off
-                            for (int i = 0; i < 2; i++) {
-                                rgbLed.setPixelColor(0, color);
-                                rgbLed.show();
-                                delay(200);
-                                rgbLed.clear();
-                                rgbLed.show();
-                                delay(200);
-                            }
-                            vTaskDelete(NULL);
-                        },
-                        "flash_led_task",
-                        2048,
-                        new bool(switchState),
-                        10,
-                        NULL
-                    );
-                    break;
-                }
-
-                default:
-                    log_i("Unhandled attribute update");
-                    break;
+        return ESP_FAIL;
+    }
+    
+    if (message->info.cluster == ESP_ZB_ZCL_CLUSTER_ID_ON_OFF) {
+        bool switchState = *(bool *)(message->attribute.data.value);
+        if (message->info.dst_endpoint == HA_ESP_SENSOR_ENDPOINT) {
+            // Fan direct control
+            digitalWrite(RELAY_FAN_PIN, switchState ? HIGH : LOW);
+            digitalWrite(LED_FAN_PIN, switchState ? HIGH : LOW);
+            if (!switchState) {
+                TM_StopTimer(0);  // Stop fan timer when turned off
+            }
+            flashRgbLed(true, switchState);
+        } else if (message->info.dst_endpoint == HA_ESP_SENSOR_ENDPOINT + 1) {
+            // Light direct control
+            digitalWrite(RELAY_LIGHT_PIN, switchState ? HIGH : LOW);
+            digitalWrite(LED_LIGHT_PIN, switchState ? HIGH : LOW);
+            if (!switchState) {
+                TM_StopTimer(1);  // Stop light timer when turned off
+            }
+            flashRgbLed(false, switchState);
+        } else if (message->info.dst_endpoint == HA_ESP_SENSOR_ENDPOINT + 2) {
+            // Fan Timer
+            if (switchState) {
+                digitalWrite(RELAY_FAN_PIN, HIGH);
+                digitalWrite(LED_FAN_PIN, HIGH);
+                TM_StartTimer(0);
+                BZ_PlayTimerTone(true, true);
+                flashRgbLed(true, true);
+            } else {
+                TM_StopTimer(0);
+            }
+        } else if (message->info.dst_endpoint == HA_ESP_SENSOR_ENDPOINT + 3) {
+            // Light Timer
+            if (switchState) {
+                digitalWrite(RELAY_LIGHT_PIN, HIGH);
+                digitalWrite(LED_LIGHT_PIN, HIGH);
+                TM_StartTimer(1);
+                BZ_PlayTimerTone(true, false);
+                flashRgbLed(false, true);
+            } else {
+                TM_StopTimer(1);
             }
         }
     }
-
     return ret;
 }
 
 esp_err_t onCustomClusterCommand(const esp_zb_zcl_custom_cluster_command_message_t *message) {
     esp_err_t ret = ESP_OK;
 
-    // Handle any logic required when receiving a command
+    // handle any logic required when receiving a command
     log_i("Receive Custom Cluster Command: 0x%x", message->info.command);
 
     return ret;
@@ -126,30 +142,40 @@ void onZigbeeIdentify(bool isIdentifying) {
     }
 }
 
-/********************* Arduino functions **************************/
 void setup() {
     Serial.begin(115200);
 
     // Init switches
     SW_InitSwitches();
 
-    // Init LED for identify function
+    // Init LED
     rgbLed.begin();
     rgbLed.setBrightness(64);
     rgbLed.clear();
     rgbLed.show();
 
-    // Initialize the relay pin
-    pinMode(RELAY_PIN, OUTPUT);
-    digitalWrite(RELAY_PIN, HIGH); // Ensure relay is off by default (since off when HIGH)
+    // Init hardware
+    pinMode(RELAY_FAN_PIN, OUTPUT);
+    pinMode(RELAY_LIGHT_PIN, OUTPUT);
+    pinMode(LED_FAN_PIN, OUTPUT);
+    pinMode(LED_LIGHT_PIN, OUTPUT);
+    
+    // Init modules
+    BZ_Init();
 
-    // Set our callbacks for Zigbee events
+    // Set default states
+    digitalWrite(RELAY_FAN_PIN, LOW);
+    digitalWrite(RELAY_LIGHT_PIN, LOW);
+    digitalWrite(LED_FAN_PIN, LOW);
+    digitalWrite(LED_LIGHT_PIN, LOW);
+
+    // Set Zigbee callbacks
     ZB_SetOnCreateClustersCallback(onCreateClusters);
     ZB_SetOnAttributeUpdatedCallback(onAttributeUpdated);
     ZB_SetOnCustomClusterCommandCallback(onCustomClusterCommand);
     ZB_SetOnIdentifyCallback(onZigbeeIdentify);
 
-    // Start Zigbee task
+    // Start Zigbee
     ZB_StartMainTask();
 }
 
