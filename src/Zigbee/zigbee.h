@@ -11,7 +11,7 @@
 /* Attribute values in ZCL string format
  * The string should be started with the length of its own.
  */
-#define MANUFACTURER_NAME "\x0B" "Milton Ave"
+#define MANUFACTURER_NAME "\x0B" "Home"
 #define MODEL_IDENTIFIER "\x0D" "Zigbee Switch"
 
 /* Zigbee configuration */
