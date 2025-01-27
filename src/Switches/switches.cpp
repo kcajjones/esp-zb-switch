@@ -2,7 +2,9 @@
 #include "switches.h"
 #include "Zigbee/zigbee.h"
 #include "../buzzer/buzzer.h"
-#include "../timer/timer.h"  // Add this include
+#include "../timer/timer.h"
+#include "../light/light.h"
+#include "../rgb/rgb.h"  // Add RGB header
 
 /********************* GPIO functions **************************/
 static QueueHandle_t gpioEventQueue = NULL;
@@ -44,27 +46,31 @@ static void onButtonPress(switch_func_pair_t *button_func_pair) {
                 digitalWrite(LED_FAN_PIN, newState);
                 if (!newState) {
                     TM_StopTimer(0);  // Stop timer when turned off
+                    RGB_FlashFanOff();  // Flash red twice
                 }
                 BZ_PlayShortBeep(true);
             }
             break;
         case SWITCH_LIGHT_CONTROL:
             if (switch_state == SWITCH_LONG_PRESS_DETECTED) {
-                digitalWrite(RELAY_LIGHT_PIN, HIGH);
+                LIGHT_SetBrightness(255);
                 digitalWrite(LED_LIGHT_PIN, HIGH);
                 TM_StartTimer(1);
                 BZ_PlayTimerTone(true, false);
             } else {
-                bool newState = !digitalRead(RELAY_LIGHT_PIN);
-                digitalWrite(RELAY_LIGHT_PIN, newState);
+                bool newState = (LIGHT_GetBrightness() == 0);
+                LIGHT_SetBrightness(newState ? 255 : 0);
                 digitalWrite(LED_LIGHT_PIN, newState);
                 if (!newState) {
                     TM_StopTimer(1);  // Stop timer when turned off
+                    RGB_FlashLightOff();  // Flash purple twice
                 }
                 BZ_PlayShortBeep(false);
             }
             break;
     }
+    // Update RGB status after button press
+    RGB_ShowTimerStatus(fanTimer != NULL, lightTimer != NULL);
 }
 
 void SW_InitSwitches() {
@@ -83,17 +89,16 @@ void SW_InitSwitches() {
 
 void SW_Loop() {
     // Handle button switch in loop()
-    uint8_t pin = 0;
     switch_func_pair_t button_func_pair;
 
     /* check if there is any queue received, if yes read out the button_func_pair */
-    if (xQueueReceive(gpioEventQueue, &button_func_pair, portMAX_DELAY)) {
-        pin = button_func_pair.pin;
+    if (xQueueReceive(gpioEventQueue, &button_func_pair, 0)) {  // Non-blocking
         setGpioInterruptEnabled(false);
 
-        while (true) {
-            bool value = digitalRead(pin);
+        // Process button press
+        bool value = digitalRead(button_func_pair.pin);
 
+        while (true) {
             switch (switch_state) {
                 case SWITCH_IDLE:
                     if (value == LOW) {
@@ -122,7 +127,6 @@ void SW_Loop() {
 
             if (switch_state == SWITCH_IDLE) {
                 setGpioInterruptEnabled(true);
-
                 break;
             }
 

@@ -1,36 +1,16 @@
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
-
 #include "Zigbee/zigbee.h"
 #include "Switches/switches.h"
 #include "timer/timer.h"
 #include "buzzer/buzzer.h"
+#include "light/light.h"
 #include "main.h"
-
-static Adafruit_NeoPixel rgbLed(1, RGB_LED_PIN, NEO_GRB + NEO_KHZ800);
+#include "rgb/rgb.h"
 
 // States
 bool isZigbeeConnected = false;
 static bool isZigbeeIdentifying = false;
-
-void flashRgbLed(bool isFan, bool isOn) {
-    uint32_t color;
-    if (isFan) {
-        color = isOn ? rgbLed.Color(0, 255, 0) : rgbLed.Color(255, 0, 0);  // Green/Red
-    } else {
-        color = isOn ? rgbLed.Color(255, 255, 255) : rgbLed.Color(255, 165, 0);  // White/Orange
-    }
-
-    // Double flash pattern
-    for (int i = 0; i < 2; i++) {
-        rgbLed.setPixelColor(0, color);
-        rgbLed.show();
-        delay(200);
-        rgbLed.clear();
-        rgbLed.show();
-        delay(200);
-    }
-}
 
 /********************* Zigbee Callbacks **************************/
 void onCreateClusters(esp_zb_cluster_list_t *clusterList) {
@@ -57,38 +37,45 @@ esp_err_t onAttributeUpdated(const esp_zb_zcl_set_attr_value_message_t *message)
             digitalWrite(LED_FAN_PIN, switchState ? HIGH : LOW);
             if (!switchState) {
                 TM_StopTimer(0);  // Stop fan timer when turned off
+                RGB_FlashFanOff();  // Flash red twice
+            } else {
+                RGB_FlashColor(0, 0, 255, 1);  // Flash blue once
             }
-            flashRgbLed(true, switchState);
         } else if (message->info.dst_endpoint == HA_ESP_SENSOR_ENDPOINT + 1) {
-            // Light direct control
-            digitalWrite(RELAY_LIGHT_PIN, switchState ? HIGH : LOW);
+            // Light direct control - modified for PWM
+            LIGHT_SetBrightness(switchState ? 255 : 0);
             digitalWrite(LED_LIGHT_PIN, switchState ? HIGH : LOW);
             if (!switchState) {
                 TM_StopTimer(1);  // Stop light timer when turned off
+                RGB_FlashLightOff();  // Flash purple twice
+            } else {
+                RGB_FlashColor(255, 255, 0, 1);  // Flash yellow once
             }
-            flashRgbLed(false, switchState);
         } else if (message->info.dst_endpoint == HA_ESP_SENSOR_ENDPOINT + 2) {
             // Fan Timer
             if (switchState) {
                 digitalWrite(RELAY_FAN_PIN, HIGH);
                 digitalWrite(LED_FAN_PIN, HIGH);
                 TM_StartTimer(0);
-                BZ_PlayTimerTone(true, true);
-                flashRgbLed(true, true);
             } else {
                 TM_StopTimer(0);
             }
         } else if (message->info.dst_endpoint == HA_ESP_SENSOR_ENDPOINT + 3) {
             // Light Timer
             if (switchState) {
-                digitalWrite(RELAY_LIGHT_PIN, HIGH);
-                digitalWrite(LED_LIGHT_PIN, HIGH);
-                TM_StartTimer(1);
-                BZ_PlayTimerTone(true, false);
-                flashRgbLed(false, true);
+                TM_StartTimer(1);                        // Start timer first
+                LIGHT_SetBrightness(255);                // Start fade last
+                digitalWrite(LED_LIGHT_PIN, HIGH);        // Update indicator
             } else {
                 TM_StopTimer(1);
             }
+        }
+        // Update RGB status after attribute update
+        RGB_ShowTimerStatus(fanTimer != NULL, lightTimer != NULL);
+    } else if (message->info.cluster == ESP_ZB_ZCL_CLUSTER_ID_LEVEL_CONTROL) {
+        if (message->info.dst_endpoint == HA_ESP_SENSOR_ENDPOINT + 1) {
+            uint8_t level = *(uint8_t *)(message->attribute.data.value);
+            LIGHT_SetBrightness(level);
         }
     }
     return ret;
@@ -105,18 +92,11 @@ esp_err_t onCustomClusterCommand(const esp_zb_zcl_custom_cluster_command_message
 
 // Identify thread task
 static void taskZigbeeIdentify(void *arg) {
-    log_i("Identify task started");
-
+    RGB_StartIdentify();
     while (isZigbeeIdentifying) {
-        rgbLed.setPixelColor(0, rgbLed.Color(255, 165, 0)); // Orange
-        rgbLed.show();
-        delay(500);
-        rgbLed.clear();
-        rgbLed.show();
-        delay(500);
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
-
-    log_i("Identify task ended");
+    RGB_StopIdentify();
     vTaskDelete(NULL);
 }
 
@@ -134,26 +114,27 @@ void setup() {
     // Init switches
     SW_InitSwitches();
 
-    // Init LED
-    rgbLed.begin();
-    rgbLed.setBrightness(64);
-    rgbLed.clear();
-    rgbLed.show();
-
     // Init hardware
     pinMode(RELAY_FAN_PIN, OUTPUT);
-    pinMode(RELAY_LIGHT_PIN, OUTPUT);
     pinMode(LED_FAN_PIN, OUTPUT);
+    pinMode(PWM_LIGHT_PIN, OUTPUT);
     pinMode(LED_LIGHT_PIN, OUTPUT);
-    
+    pinMode(BUZZER_PIN, OUTPUT);
+
     // Init modules
     BZ_Init();
 
     // Set default states
     digitalWrite(RELAY_FAN_PIN, LOW);
-    digitalWrite(RELAY_LIGHT_PIN, LOW);
     digitalWrite(LED_FAN_PIN, LOW);
     digitalWrite(LED_LIGHT_PIN, LOW);
+
+    // Setup light control
+    LIGHT_Init();
+    LIGHT_SetBrightness(0);
+
+    TM_Init();  // Will handle RGB LED init
+    RGB_Init();
 
     // Set Zigbee callbacks
     ZB_SetOnCreateClustersCallback(onCreateClusters);
@@ -184,9 +165,15 @@ void loop() {
                 fadeValue--;
                 if (fadeValue <= 0) fadeDirection = true;
             }
-
-            rgbLed.setPixelColor(0, rgbLed.Color(fadeValue, 0, fadeValue)); // Purple with fade effect
-            rgbLed.show();
         }
     }
+
+    if (isZigbeeConnected) {
+        RGB_Update();
+    } else {
+        // LED off when not connected
+    }
+
+    // Update RGB status based on timer status
+    RGB_ShowTimerStatus(fanTimer != NULL, lightTimer != NULL);
 }

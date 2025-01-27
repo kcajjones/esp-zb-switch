@@ -160,47 +160,46 @@ static esp_zb_ep_list_t *createSensorEndpoint(uint8_t endpoint_id) {
     log_i("Creating Sensor Endpoints");
     esp_zb_ep_list_t *ep_list = esp_zb_ep_list_create();
 
-    // First endpoint (Fan)
+    // First endpoint (Fan Switch)
     esp_zb_endpoint_config_t endpoint_config = {
         .endpoint = endpoint_id,
         .app_profile_id = ESP_ZB_AF_HA_PROFILE_ID,
-        .app_device_id = ESP_ZB_HA_CUSTOM_ATTR_DEVICE_ID,
+        .app_device_id = ESP_ZB_HA_ON_OFF_SWITCH_DEVICE_ID,
         .app_device_version = 1
     };
-
-    esp_zb_cluster_list_t *clusterList = createBasicClusters();
+    
+    esp_zb_cluster_list_t *fanClusterList = createBasicClusters();
     if (onCreateClustersCallback != NULL) {
         log_i("Calling onCreateClustersCallback for fan endpoint");
-        onCreateClustersCallback(clusterList);
+        onCreateClustersCallback(fanClusterList);
     }
-    esp_zb_ep_list_add_ep(ep_list, clusterList, endpoint_config);
+    esp_zb_ep_list_add_ep(ep_list, fanClusterList, endpoint_config);
 
-    // Second endpoint (Light)
+    // Second endpoint (Dimmable Light)
     endpoint_config.endpoint = endpoint_id + 1;
+    endpoint_config.app_device_id = ESP_ZB_HA_DIMMABLE_LIGHT_DEVICE_ID;
     esp_zb_cluster_list_t *lightClusterList = createBasicClusters();
-    esp_zb_on_off_cluster_cfg_t light_cfg = {
-        .on_off = false
-    };
+    esp_zb_on_off_cluster_cfg_t light_cfg = { .on_off = false };
     esp_zb_attribute_list_t *light_cluster = esp_zb_on_off_cluster_create(&light_cfg);
     esp_zb_cluster_list_add_on_off_cluster(lightClusterList, light_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
+    esp_zb_attribute_list_t *level_cluster = esp_zb_level_cluster_create(NULL);
+    esp_zb_cluster_list_add_level_cluster(lightClusterList, level_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
     esp_zb_ep_list_add_ep(ep_list, lightClusterList, endpoint_config);
 
     // Third endpoint (Fan Timer)
     endpoint_config.endpoint = endpoint_id + 2;
+    endpoint_config.app_device_id = ESP_ZB_HA_ON_OFF_SWITCH_DEVICE_ID;  // Reset to switch type
     esp_zb_cluster_list_t *fanTimerClusterList = createBasicClusters();
-    esp_zb_on_off_cluster_cfg_t fan_timer_cfg = {
-        .on_off = false
-    };
+    esp_zb_on_off_cluster_cfg_t fan_timer_cfg = { .on_off = false };
     esp_zb_attribute_list_t *fan_timer_cluster = esp_zb_on_off_cluster_create(&fan_timer_cfg);
     esp_zb_cluster_list_add_on_off_cluster(fanTimerClusterList, fan_timer_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
     esp_zb_ep_list_add_ep(ep_list, fanTimerClusterList, endpoint_config);
 
     // Fourth endpoint (Light Timer)
     endpoint_config.endpoint = endpoint_id + 3;
+    endpoint_config.app_device_id = ESP_ZB_HA_ON_OFF_SWITCH_DEVICE_ID;  // Reset to switch type
     esp_zb_cluster_list_t *lightTimerClusterList = createBasicClusters();
-    esp_zb_on_off_cluster_cfg_t light_timer_cfg = {
-        .on_off = false
-    };
+    esp_zb_on_off_cluster_cfg_t light_timer_cfg = { .on_off = false };
     esp_zb_attribute_list_t *light_timer_cluster = esp_zb_on_off_cluster_create(&light_timer_cfg);
     esp_zb_cluster_list_add_on_off_cluster(lightTimerClusterList, light_timer_cluster, ESP_ZB_ZCL_CLUSTER_SERVER_ROLE);
     esp_zb_ep_list_add_ep(ep_list, lightTimerClusterList, endpoint_config);

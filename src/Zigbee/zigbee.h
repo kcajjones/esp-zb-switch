@@ -8,11 +8,13 @@
 #include "freertos/task.h"
 #include "ha/esp_zigbee_ha_standard.h"
 
+// ...existing code...
+
 /* Attribute values in ZCL string format
  * The string should be started with the length of its own.
  */
-#define MANUFACTURER_NAME "\x0B" "Home"
-#define MODEL_IDENTIFIER "\x0D" "Zigbee Switch"
+#define MANUFACTURER_NAME "\x0B" "Milton Ave"
+#define MODEL_IDENTIFIER "\x0D" "Zb Hob Extractor Fan Light"
 
 /* Zigbee configuration */
 #define INSTALLCODE_POLICY_ENABLE false                                     /* enable the install code policy for security */
