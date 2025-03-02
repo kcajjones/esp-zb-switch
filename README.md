@@ -2,13 +2,12 @@ Zigbee controlled extractor fan and light strip for my kitchen hob
 
 A Zigbee controlled ESP32-C6 with timer functionality, rgb lighting and buzzer alerts for on/off and timer on/off functions, along with local control via two momentary buttons which have an integrated single colour led.
 
-This code is made up of 4 simple zZigbee controlled extractor fan and light strip for my kitchen hob
+This code is made up of 4 simple zigbee cluster switches with the following functions:
 
-A Zigbee controlled ESP32-C6 with timer functionality, rgb lighting and buzzer alerts for on/off and timer on/off functions, along with local control via two momentary buttons which have an integrated single colour led.
-
-This code is made up of 4 simple zigbee cluster switches with the following function:
-
-Light on/off Fan on/off Light Timer on/off Fan Timer on/off
+Light on/off
+Fan on/off
+Light Timer on/off
+Fan Timer on/off
 
 In detail:
 
